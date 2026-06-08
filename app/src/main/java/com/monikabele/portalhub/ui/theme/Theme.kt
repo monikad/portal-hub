@@ -1,11 +1,4 @@
-/*
- * Copyright (c) Meta Platforms, Inc. and affiliates.
- *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- */
-
-package com.meta.portal.sampleapp.ui.theme
+package com.monikabele.portalhub.ui.theme
 
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -19,12 +12,12 @@ import androidx.compose.ui.platform.LocalContext
 
 private val LightColorScheme =
     lightColorScheme(
-        primary = MetaBlue,
-        onPrimary = OnMetaBlue,
-        primaryContainer = MetaBlueLight,
-        onPrimaryContainer = OnMetaBlueLight,
+        primary = PortalBlue,
+        onPrimary = OnPortalBlue,
+        primaryContainer = PortalBlueLight,
+        onPrimaryContainer = OnPortalBlueLight,
         secondary = NeutralGrey,
-        onSecondary = OnMetaBlue,
+        onSecondary = OnPortalBlue,
         background = BackgroundLight,
         surface = SurfaceLight,
         onBackground = ContentOnLight,
@@ -33,12 +26,12 @@ private val LightColorScheme =
 
 private val DarkColorScheme =
     darkColorScheme(
-        primary = MetaBlue,
-        onPrimary = OnMetaBlue,
-        primaryContainer = MetaBlueDarkCont,
-        onPrimaryContainer = OnMetaBlueDarkC,
+        primary = PortalBlue,
+        onPrimary = OnPortalBlue,
+        primaryContainer = PortalBlueDarkCont,
+        onPrimaryContainer = OnPortalBlueDarkC,
         secondary = NeutralGreyDark,
-        onSecondary = OnMetaBlue,
+        onSecondary = OnPortalBlue,
         background = BackgroundDark,
         surface = SurfaceDark,
         onBackground = ContentOnDark,
@@ -46,9 +39,8 @@ private val DarkColorScheme =
     )
 
 @Composable
-fun SampleAppTheme(
+fun PortalHubTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    // Disabled: dynamic color overrides all custom colors and appears over-saturated in MR headsets
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {

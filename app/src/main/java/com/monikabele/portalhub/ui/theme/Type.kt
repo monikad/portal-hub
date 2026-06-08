@@ -1,11 +1,4 @@
-/*
- * Copyright (c) Meta Platforms, Inc. and affiliates.
- *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- */
-
-package com.meta.portal.sampleapp.ui.theme
+package com.monikabele.portalhub.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
@@ -13,7 +6,7 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
-import com.meta.portal.sampleapp.R
+import com.monikabele.portalhub.R
 
 private val InterFontFamily =
     FontFamily(
@@ -22,7 +15,7 @@ private val InterFontFamily =
         Font(R.font.inter_bold, weight = FontWeight.Bold),
     )
 
-// Meta Horizon: Inter typeface, min 14sp, 18sp recommended for body, Medium/Bold weights
+// Inter typeface tuned for large touch displays
 val Typography =
     Typography(
         headlineSmall =
