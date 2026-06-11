@@ -28,6 +28,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -52,6 +54,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -72,6 +75,13 @@ private enum class PortalMode(val label: String) {
   Office("Office"),
 }
 
+private enum class HomeSection(val label: String) {
+  Calendar("Calendar"),
+  Lists("Lists"),
+  Chores("Chores"),
+  Notes("Notes"),
+}
+
 private data class DashboardState(
     val mode: PortalMode,
     val now: String,
@@ -88,6 +98,8 @@ private data class DashboardState(
 private data class FocusItem(val title: String, val detail: String, val tone: AccentTone)
 
 private data class PortalEvent(val time: String, val title: String, val detail: String)
+
+private data class CalendarFeed(val label: String, val url: String)
 
 private data class PortalNote(
     val id: String,
@@ -113,10 +125,10 @@ private enum class SyncStatus(val label: String) {
 }
 
 private enum class AccentTone(val color: Color) {
-  Blue(Color(0xFF5B8CFF)),
-  Green(Color(0xFF38B27A)),
-  Amber(Color(0xFFE6A23C)),
-  Rose(Color(0xFFE66A8A)),
+  Blue(Color(0xFF6FA8A0)),
+  Green(Color(0xFF5FAF82)),
+  Amber(Color(0xFFD6A64F)),
+  Rose(Color(0xFFD98195)),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -133,6 +145,7 @@ class MainActivity : ComponentActivity() {
         var syncStatus by remember { mutableStateOf(SyncStatus.Local) }
         var agentMessage by remember { mutableStateOf<String?>(null) }
         var musicMessage by remember { mutableStateOf<String?>(null) }
+        var selectedHomeSection by remember { mutableStateOf(HomeSection.Calendar) }
         val notesByMode =
             remember {
               mutableStateMapOf(
@@ -158,13 +171,20 @@ class MainActivity : ComponentActivity() {
 
         LaunchedEffect(Unit) {
           refreshHomeCalendar(
+              context = appContext,
               onSuccess = { events ->
                 appContext.runOnUiThread {
                   eventsByMode[PortalMode.Home] = events
                   savePortalEvents(appContext, PortalMode.Home, events)
                 }
               },
-              onFailure = {},
+              onFailure = {
+                appContext.runOnUiThread {
+                  if (eventsByMode[PortalMode.Home].orEmpty() == dashboardFor(PortalMode.Home).events) {
+                    eventsByMode[PortalMode.Home] = calendarSetupEvents()
+                  }
+                }
+              },
           )
         }
 
@@ -197,18 +217,27 @@ class MainActivity : ComponentActivity() {
               },
               onAddNoteRequest = { showAddNote = true },
               onEditNote = { noteBeingEdited = it },
+              selectedHomeSection = selectedHomeSection,
+              onHomeSectionSelected = { selectedHomeSection = it },
               syncStatus = syncStatus,
               onSync = {
                 syncStatus = SyncStatus.Syncing
                 if (mode == PortalMode.Home) {
                   refreshHomeCalendar(
+                      context = appContext,
                       onSuccess = { events ->
                         appContext.runOnUiThread {
                           eventsByMode[PortalMode.Home] = events
                           savePortalEvents(appContext, PortalMode.Home, events)
                         }
                       },
-                      onFailure = {},
+                      onFailure = {
+                        appContext.runOnUiThread {
+                          if (eventsByMode[PortalMode.Home].orEmpty() == dashboardFor(PortalMode.Home).events) {
+                            eventsByMode[PortalMode.Home] = calendarSetupEvents()
+                          }
+                        }
+                      },
                   )
                 }
                 syncPortalNotes(
@@ -264,9 +293,11 @@ class MainActivity : ComponentActivity() {
           NoteEditorDialog(
               mode = mode,
               note = null,
+              plainNote = mode == PortalMode.Home && selectedHomeSection == HomeSection.Notes,
               onDismiss = { showAddNote = false },
               onSave = { note ->
-                val updatedNotes = listOf(note) + notesByMode[mode].orEmpty()
+                val newNotes = expandSavedNote(note)
+                val updatedNotes = newNotes + notesByMode[mode].orEmpty()
                 notesByMode[mode] = updatedNotes
                 savePortalNotes(appContext, mode, updatedNotes)
                 syncStatus = SyncStatus.Local
@@ -281,6 +312,7 @@ class MainActivity : ComponentActivity() {
           NoteEditorDialog(
               mode = mode,
               note = existingNote,
+              plainNote = existingNote.isGeneralNote(),
               onDismiss = { noteBeingEdited = null },
               onSave = { updatedNote ->
                 val updatedNotes =
@@ -323,6 +355,8 @@ private fun PortalDashboard(
     onModeSelected: (PortalMode) -> Unit,
     onAddNoteRequest: () -> Unit,
     onEditNote: (PortalNote) -> Unit,
+    selectedHomeSection: HomeSection,
+    onHomeSectionSelected: (HomeSection) -> Unit,
     syncStatus: SyncStatus,
     onSync: () -> Unit,
     agentMessage: String?,
@@ -343,31 +377,144 @@ private fun PortalDashboard(
       verticalArrangement = Arrangement.spacedBy(18.dp),
   ) {
     ModeSwitch(selectedMode = selectedMode, onModeSelected = onModeSelected)
-    NowPanel(state = state)
-    SchedulePanel(events = state.events)
-    NotesPanel(
-        notes = state.notes,
-        syncStatus = syncStatus,
-        onAddNoteRequest = onAddNoteRequest,
-        onSync = onSync,
-        onEditNote = onEditNote,
-        onCompleteNote = onCompleteNote,
-        onReopenNote = onReopenNote,
-    )
-    FocusGrid(items = state.focusItems)
-    AgentActions(
-        primaryAgent = state.primaryAgent,
-        secondaryAgent = state.secondaryAgent,
-        agentMessage = agentMessage,
-        onAskAgent = onAskAgent,
-        onAddNoteRequest = onAddNoteRequest,
-    )
-    RoutineActions(
-        routines = state.routines,
-        musicModes = state.musicModes,
-        musicMessage = musicMessage,
-        onMusicModeSelected = onMusicModeSelected,
-    )
+    if (state.mode == PortalMode.Home) {
+      HomeCommandCenter(
+          state = state,
+          selectedHomeSection = selectedHomeSection,
+          onHomeSectionSelected = onHomeSectionSelected,
+          syncStatus = syncStatus,
+          onAddNoteRequest = onAddNoteRequest,
+          onSync = onSync,
+          onEditNote = onEditNote,
+          onCompleteNote = onCompleteNote,
+          onReopenNote = onReopenNote,
+      )
+    } else {
+      SchedulePanel(events = state.events)
+      NotesPanel(
+          notes = state.notes,
+          syncStatus = syncStatus,
+          plainNotesOnly = false,
+          onAddNoteRequest = onAddNoteRequest,
+          onSync = onSync,
+          onEditNote = onEditNote,
+          onCompleteNote = onCompleteNote,
+      )
+      FocusGrid(items = state.focusItems)
+      NowPanel(state = state)
+      AgentActions(
+          primaryAgent = state.primaryAgent,
+          secondaryAgent = state.secondaryAgent,
+          agentMessage = agentMessage,
+          onAskAgent = onAskAgent,
+          onAddNoteRequest = onAddNoteRequest,
+      )
+      RoutineActions(
+          routines = state.routines,
+          musicModes = state.musicModes,
+          musicMessage = musicMessage,
+          onMusicModeSelected = onMusicModeSelected,
+      )
+    }
+  }
+}
+
+@Composable
+private fun HomeCommandCenter(
+    state: DashboardState,
+    selectedHomeSection: HomeSection,
+    onHomeSectionSelected: (HomeSection) -> Unit,
+    syncStatus: SyncStatus,
+    onAddNoteRequest: () -> Unit,
+    onSync: () -> Unit,
+    onEditNote: (PortalNote) -> Unit,
+    onCompleteNote: (PortalNote) -> Unit,
+    onReopenNote: (PortalNote) -> Unit,
+) {
+  Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    HomeSectionTabs(selected = selectedHomeSection, onSelected = onHomeSectionSelected)
+    when (selectedHomeSection) {
+      HomeSection.Calendar -> {
+        SchedulePanel(events = state.events)
+        HomeSummaryStrip(notes = state.notes, events = state.events)
+        FocusGrid(items = state.focusItems)
+      }
+      HomeSection.Lists ->
+          ListsPanel(
+              notes = state.notes,
+              onAddNoteRequest = onAddNoteRequest,
+              onEditNote = onEditNote,
+              onCompleteNote = onCompleteNote,
+              onReopenNote = onReopenNote,
+          )
+      HomeSection.Chores ->
+          ChoresPanel(
+              notes = state.notes,
+              onAddNoteRequest = onAddNoteRequest,
+              onEditNote = onEditNote,
+              onCompleteNote = onCompleteNote,
+              onReopenNote = onReopenNote,
+          )
+      HomeSection.Notes ->
+          NotesPanel(
+              notes = state.notes,
+              syncStatus = syncStatus,
+              plainNotesOnly = true,
+              onAddNoteRequest = onAddNoteRequest,
+              onSync = onSync,
+              onEditNote = onEditNote,
+              onCompleteNote = onCompleteNote,
+          )
+    }
+  }
+}
+
+@Composable
+private fun HomeSectionTabs(selected: HomeSection, onSelected: (HomeSection) -> Unit) {
+  FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    HomeSection.entries.forEach { section ->
+      FilterChip(
+          selected = selected == section,
+          onClick = { onSelected(section) },
+          label = { Text(section.label, fontSize = 19.sp, fontWeight = FontWeight.SemiBold) },
+          modifier = Modifier.height(54.dp),
+          colors =
+              FilterChipDefaults.filterChipColors(
+                  selectedContainerColor = MaterialTheme.colorScheme.primary,
+                  selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+              ),
+      )
+    }
+  }
+}
+
+@Composable
+private fun HomeSummaryStrip(notes: List<PortalNote>, events: List<PortalEvent>) {
+  Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+    SummaryTile("Events", events.size.toString(), "visible", AccentTone.Amber, Modifier.weight(1f))
+    SummaryTile("Open", notes.count { it.status == NoteStatus.Open }.toString(), "notes", AccentTone.Green, Modifier.weight(1f))
+    SummaryTile("Pinned", notes.count { it.pinned && it.status == NoteStatus.Open }.toString(), "important", AccentTone.Rose, Modifier.weight(1f))
+  }
+}
+
+@Composable
+private fun SummaryTile(
+    label: String,
+    value: String,
+    detail: String,
+    tone: AccentTone,
+    modifier: Modifier = Modifier,
+) {
+  Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surface, modifier = modifier.height(104.dp)) {
+    Column(modifier = Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.SpaceBetween) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(tone.color))
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(label, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.74f), fontSize = 17.sp, maxLines = 1)
+      }
+      Text(value, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+      Text(detail, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f), fontSize = 16.sp, maxLines = 1)
+    }
   }
 }
 
@@ -485,29 +632,25 @@ private fun FocusCard(item: FocusItem, modifier: Modifier = Modifier) {
 private fun NotesPanel(
     notes: List<PortalNote>,
     syncStatus: SyncStatus,
+    plainNotesOnly: Boolean,
     onAddNoteRequest: () -> Unit,
     onSync: () -> Unit,
     onEditNote: (PortalNote) -> Unit,
     onCompleteNote: (PortalNote) -> Unit,
-    onReopenNote: (PortalNote) -> Unit,
 ) {
-  var selectedFilter by remember(notes) { mutableStateOf("All") }
-  val openAllNotes = notes.filter { it.status == NoteStatus.Open }
-  val filters = listOf("All") + openAllNotes.map { it.category }.distinct()
-  val openNotes =
-      if (selectedFilter == "All") {
-        openAllNotes
+  val visibleNotes =
+      if (plainNotesOnly) {
+        notes.filter { it.status != NoteStatus.Archived && it.isGeneralNote() }
       } else {
-        openAllNotes.filter { it.category == selectedFilter }
+        notes.filter { it.status == NoteStatus.Open }
       }
-  val doneNotes = notes.filter { it.status == NoteStatus.Done }.take(3)
 
   Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
       Column {
         SectionTitle("Notes")
         Text(
-            "${openAllNotes.size} open | ${doneNotes.size} done recent",
+            if (plainNotesOnly) "${visibleNotes.size} saved notes" else "${visibleNotes.size} open notes",
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f),
             fontSize = 18.sp,
         )
@@ -527,29 +670,234 @@ private fun NotesPanel(
         }
       }
     }
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-      filters.forEach { filter ->
-        FilterChip(
-            selected = selectedFilter == filter,
-            onClick = { selectedFilter = filter },
-            label = { Text(filter, fontSize = 17.sp) },
-            colors =
-                FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MaterialTheme.colorScheme.primary,
-                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                ),
-        )
-      }
-    }
-    if (openNotes.isEmpty()) {
+    if (visibleNotes.isEmpty()) {
       EmptyNotesRow()
     } else {
-      openNotes.forEach { note ->
+      visibleNotes.forEach { note ->
         NoteRow(note = note, onEditNote = onEditNote, onCompleteNote = onCompleteNote)
       }
     }
-    if (doneNotes.isNotEmpty()) {
-      RecentlyDoneNotes(notes = doneNotes, onReopenNote = onReopenNote)
+  }
+}
+
+@Composable
+private fun ListsPanel(
+    notes: List<PortalNote>,
+    onAddNoteRequest: () -> Unit,
+    onEditNote: (PortalNote) -> Unit,
+    onCompleteNote: (PortalNote) -> Unit,
+    onReopenNote: (PortalNote) -> Unit,
+) {
+  val visibleNotes = notes.filter { it.status != NoteStatus.Archived }
+  val listNotes = visibleNotes.filterNot { it.isChoreNote() }
+  val grocery = listNotes.filter { it.category == "Grocery" }
+  val school = listNotes.filter { it.category == "School" || it.category == "Kids" }
+  val other = listNotes.filterNot { it in grocery || it in school }
+
+  Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    PanelHeader(
+        title = "Lists",
+        detail = "Groceries, school, household, and quick reminders",
+        actionLabel = "+ Item",
+        onAction = onAddNoteRequest,
+    )
+    ListBucket(
+        title = "Grocery",
+        accent = AccentTone.Green,
+        notes = grocery,
+        emptyText = "No grocery items yet.",
+        onEditNote = onEditNote,
+        onCompleteNote = onCompleteNote,
+        onReopenNote = onReopenNote,
+    )
+    ListBucket(
+        title = "School & Kids",
+        accent = AccentTone.Rose,
+        notes = school,
+        emptyText = "No school or kids reminders.",
+        onEditNote = onEditNote,
+        onCompleteNote = onCompleteNote,
+        onReopenNote = onReopenNote,
+    )
+    if (other.isNotEmpty()) {
+      ListBucket(
+          title = "Other",
+          accent = AccentTone.Blue,
+          notes = other,
+          emptyText = "",
+          onEditNote = onEditNote,
+          onCompleteNote = onCompleteNote,
+          onReopenNote = onReopenNote,
+      )
+    }
+  }
+}
+
+@Composable
+private fun ChoresPanel(
+    notes: List<PortalNote>,
+    onAddNoteRequest: () -> Unit,
+    onEditNote: (PortalNote) -> Unit,
+    onCompleteNote: (PortalNote) -> Unit,
+    onReopenNote: (PortalNote) -> Unit,
+) {
+  val visibleNotes = notes.filter { it.status != NoteStatus.Archived && it.isChoreNote() }
+  val people = listOf("You", "Partner", "Child 1", "Child 2", "Helper")
+
+  Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    PanelHeader(
+        title = "Chores",
+        detail = "A simple family board for morning, evening, and household tasks",
+        actionLabel = "+ Chore",
+        onAction = onAddNoteRequest,
+    )
+    people.forEachIndexed { index, person ->
+      val personNotes = visibleNotes.filter { it.assignee == person }
+      ChorePersonCard(
+          person = person,
+          accent = AccentTone.entries[index % AccentTone.entries.size],
+          notes = personNotes,
+          onEditNote = onEditNote,
+          onCompleteNote = onCompleteNote,
+          onReopenNote = onReopenNote,
+      )
+    }
+  }
+}
+
+@Composable
+private fun PanelHeader(title: String, detail: String, actionLabel: String, onAction: () -> Unit) {
+  Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+      SectionTitle(title)
+      Text(detail, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f), fontSize = 18.sp, lineHeight = 23.sp)
+    }
+    OutlinedButton(onClick = onAction, modifier = Modifier.height(58.dp), contentPadding = PaddingValues(horizontal = 18.dp)) {
+      Text(actionLabel, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+    }
+  }
+}
+
+@Composable
+private fun ListBucket(
+    title: String,
+    accent: AccentTone,
+    notes: List<PortalNote>,
+    emptyText: String,
+    onEditNote: (PortalNote) -> Unit,
+    onCompleteNote: (PortalNote) -> Unit,
+    onReopenNote: (PortalNote) -> Unit,
+) {
+  Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surface) {
+    Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(modifier = Modifier.size(14.dp).clip(CircleShape).background(accent.color))
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(title, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.weight(1f))
+        Text(
+            "${notes.count { it.status == NoteStatus.Open }}/${notes.size}",
+            color = MaterialTheme.colorScheme.secondary,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+        )
+      }
+      if (notes.isEmpty()) {
+        Text(emptyText, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f), fontSize = 19.sp)
+      } else {
+        notes.forEach { note ->
+          CompactTaskRow(note = note, onEditNote = onEditNote, onCompleteNote = onCompleteNote, onReopenNote = onReopenNote)
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun ChorePersonCard(
+    person: String,
+    accent: AccentTone,
+    notes: List<PortalNote>,
+    onEditNote: (PortalNote) -> Unit,
+    onCompleteNote: (PortalNote) -> Unit,
+    onReopenNote: (PortalNote) -> Unit,
+) {
+  Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surface) {
+    Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(modifier = Modifier.size(36.dp).clip(CircleShape).background(accent.color), contentAlignment = Alignment.Center) {
+          Text(person.take(1), color = Color(0xFF151515), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+          Text(person, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+          Text(
+              "${notes.count { it.status == NoteStatus.Open }} open | ${notes.count { it.status == NoteStatus.Done }} done",
+              color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.66f),
+              fontSize = 17.sp,
+          )
+        }
+      }
+      if (notes.isEmpty()) {
+        Text("No tasks assigned.", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f), fontSize = 19.sp)
+      } else {
+        notes.forEach { note ->
+          CompactTaskRow(note = note, onEditNote = onEditNote, onCompleteNote = onCompleteNote, onReopenNote = onReopenNote)
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun CompactTaskRow(
+    note: PortalNote,
+    onEditNote: (PortalNote) -> Unit,
+    onCompleteNote: (PortalNote) -> Unit,
+    onReopenNote: (PortalNote) -> Unit,
+) {
+  val isDone = note.status == NoteStatus.Done
+  Row(
+      modifier = Modifier.fillMaxWidth(),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(10.dp),
+  ) {
+    Checkbox(
+        checked = isDone,
+        onCheckedChange = { isChecked ->
+          if (isChecked) {
+            onCompleteNote(note)
+          } else {
+            onReopenNote(note)
+          }
+        },
+        modifier = Modifier.size(46.dp),
+        colors =
+            CheckboxDefaults.colors(
+                checkedColor = MaterialTheme.colorScheme.primary,
+                uncheckedColor = MaterialTheme.colorScheme.secondary,
+                checkmarkColor = MaterialTheme.colorScheme.onPrimary,
+            ),
+    )
+    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+      Text(
+          note.text,
+          fontSize = 20.sp,
+          fontWeight = FontWeight.SemiBold,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+          textDecoration = if (isDone) TextDecoration.LineThrough else TextDecoration.None,
+          color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (isDone) 0.48f else 1f),
+      )
+      Text(
+          "${note.assignee} | ${note.due}",
+          color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (isDone) 0.42f else 0.62f),
+          fontSize = 16.sp,
+          maxLines = 1,
+      )
+    }
+    TextButton(onClick = { onEditNote(note) }, modifier = Modifier.height(46.dp)) {
+      Text("Edit", fontSize = 16.sp)
     }
   }
 }
@@ -602,6 +950,7 @@ private fun NoteRow(
     onEditNote: (PortalNote) -> Unit,
     onCompleteNote: (PortalNote) -> Unit,
 ) {
+  val isGeneralNote = note.isGeneralNote()
   Card(
       shape = RoundedCornerShape(8.dp),
       colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -616,24 +965,28 @@ private fun NoteRow(
               Modifier
                   .size(46.dp)
                   .clip(RoundedCornerShape(8.dp))
-                  .background(if (note.pinned) Color(0xFFE6A23C) else Color(0xFF5B8CFF)),
+                  .background(if (note.pinned) Color(0xFFE6A23C) else AccentTone.Blue.color),
           contentAlignment = Alignment.Center,
       ) {
-        Text(if (note.pinned) "!" else "+", color = Color(0xFF101010), fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Text(if (note.pinned) "!" else "N", color = Color(0xFF101010), fontSize = 22.sp, fontWeight = FontWeight.Bold)
       }
       Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(note.text, fontSize = 23.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold)
-        Text(
-            "${note.category} | ${note.assignee} | ${note.due}",
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f),
-            fontSize = 18.sp,
-        )
+        if (!isGeneralNote) {
+          Text(
+              "${note.category} | ${note.assignee} | ${note.due}",
+              color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f),
+              fontSize = 18.sp,
+          )
+        }
       }
       OutlinedButton(onClick = { onEditNote(note) }, modifier = Modifier.height(56.dp), contentPadding = PaddingValues(horizontal = 18.dp)) {
         Text("Edit", fontSize = 18.sp)
       }
-      Button(onClick = { onCompleteNote(note) }, modifier = Modifier.height(56.dp), contentPadding = PaddingValues(horizontal = 18.dp)) {
-        Text("Done", fontSize = 18.sp)
+      if (!isGeneralNote) {
+        Button(onClick = { onCompleteNote(note) }, modifier = Modifier.height(56.dp), contentPadding = PaddingValues(horizontal = 18.dp)) {
+          Text("Done", fontSize = 18.sp)
+        }
       }
     }
   }
@@ -729,15 +1082,16 @@ private fun ActionButton(
 private fun NoteEditorDialog(
     mode: PortalMode,
     note: PortalNote?,
+    plainNote: Boolean,
     onDismiss: () -> Unit,
     onSave: (PortalNote) -> Unit,
     onArchive: (() -> Unit)?,
     onDelete: (() -> Unit)?,
 ) {
   var text by remember(note) { mutableStateOf(note?.text.orEmpty()) }
-  var assignee by remember(note) { mutableStateOf(note?.assignee ?: "You") }
-  var category by remember(note) { mutableStateOf(note?.category ?: if (mode == PortalMode.Home) "Grocery" else "Career") }
-  var due by remember(note) { mutableStateOf(note?.due ?: "Today") }
+  var assignee by remember(note, plainNote) { mutableStateOf(note?.assignee ?: if (plainNote) "" else "You") }
+  var category by remember(note, plainNote) { mutableStateOf(note?.category ?: if (plainNote) "Note" else if (mode == PortalMode.Home) "Grocery" else "Career") }
+  var due by remember(note, plainNote) { mutableStateOf(note?.due ?: if (plainNote) "" else "Today") }
   val canSave = text.trim().isNotEmpty()
   val isEditing = note != null
 
@@ -757,28 +1111,30 @@ private fun NoteEditorDialog(
               onValueChange = { text = it },
               label = { Text("Note") },
               singleLine = false,
-              minLines = 2,
+              minLines = if (plainNote) 7 else 2,
               textStyle = androidx.compose.ui.text.TextStyle(fontSize = 22.sp),
               modifier = Modifier.fillMaxWidth(),
           )
-          QuickChoiceRow(
-              label = "Person",
-              options = if (mode == PortalMode.Home) listOf("You", "Partner", "Child 1", "Child 2", "Helper") else listOf("You", "Execution", "Writer", "Strategy", "Career"),
-              selected = assignee,
-              onSelected = { assignee = it },
-          )
-          QuickChoiceRow(
-              label = "Category",
-              options = if (mode == PortalMode.Home) listOf("Grocery", "School", "Food", "Kids", "Household") else listOf("Career", "Writing", "Applications", "Learning", "Reminder"),
-              selected = category,
-              onSelected = { category = it },
-          )
-          QuickChoiceRow(
-              label = "Due",
-              options = listOf("Today", "Tomorrow", "This week", "Someday"),
-              selected = due,
-              onSelected = { due = it },
-          )
+          if (!plainNote) {
+            QuickChoiceRow(
+                label = "Person",
+                options = if (mode == PortalMode.Home) listOf("You", "Partner", "Child 1", "Child 2", "Helper") else listOf("You", "Execution", "Writer", "Strategy", "Career"),
+                selected = assignee,
+                onSelected = { assignee = it },
+            )
+            QuickChoiceRow(
+                label = "Category",
+                options = if (mode == PortalMode.Home) listOf("Grocery", "School", "Food", "Kids", "Household") else listOf("Career", "Writing", "Applications", "Learning", "Reminder"),
+                selected = category,
+                onSelected = { category = it },
+            )
+            QuickChoiceRow(
+                label = "Due",
+                options = listOf("Today", "Tomorrow", "This week", "Someday"),
+                selected = due,
+                onSelected = { due = it },
+            )
+          }
         }
       },
       confirmButton = {
@@ -789,9 +1145,9 @@ private fun NoteEditorDialog(
                     PortalNote(
                         id = note?.id ?: "note-${System.currentTimeMillis()}",
                         text = text.trim(),
-                        assignee = assignee,
-                        category = category,
-                        due = due,
+                        assignee = if (plainNote) "" else assignee,
+                        category = if (plainNote) "Note" else category,
+                        due = if (plainNote) "" else due,
                         pinned = note?.pinned ?: false,
                         status = note?.status ?: NoteStatus.Open,
                     )
@@ -927,11 +1283,33 @@ private fun musicSuggestionFor(mode: String): String =
       else -> "$mode mode selected. Pick music that matches the room and the next action."
     }
 
+private fun expandSavedNote(note: PortalNote): List<PortalNote> {
+  if (note.category != "Grocery") return listOf(note)
+
+  val groceryItems =
+      note.text
+          .split(',')
+          .map { it.trim() }
+          .filter { it.isNotEmpty() }
+
+  if (groceryItems.size <= 1) return listOf(note)
+
+  return groceryItems.mapIndexed { index, item ->
+    note.copy(id = "${note.id}-$index", text = item)
+  }
+}
+
+private fun PortalNote.isChoreNote(): Boolean =
+    category == "Household" || category == "Food"
+
+private fun PortalNote.isGeneralNote(): Boolean =
+    category == "Note" || category == "General"
+
 private const val NOTES_PREFS = "personal_os_portal_notes"
 private const val EVENTS_PREFS = "personal_os_portal_events"
 private const val PORTAL_SETTINGS_PREFS = "personal_os_portal_settings"
 private const val SELECTED_MODE_KEY = "selected_mode"
-private const val HOME_CALENDAR_FEED_URL = ""
+private const val CALENDAR_FEEDS_ASSET = "calendar-feeds.local.json"
 
 private fun loadPortalNotes(context: Context, mode: PortalMode): List<PortalNote> {
   val seedNotes = dashboardFor(mode).notes
@@ -957,7 +1335,12 @@ private fun savePortalNotes(context: Context, mode: PortalMode, notes: List<Port
 }
 
 private fun loadPortalEvents(context: Context, mode: PortalMode): List<PortalEvent> {
-  val seedEvents = dashboardFor(mode).events
+  val seedEvents =
+      if (mode == PortalMode.Home && loadCalendarFeeds(context).isEmpty()) {
+        calendarSetupEvents()
+      } else {
+        dashboardFor(mode).events
+      }
   val json =
       context
           .getSharedPreferences(EVENTS_PREFS, Context.MODE_PRIVATE)
@@ -980,6 +1363,12 @@ private fun savePortalEvents(context: Context, mode: PortalMode, events: List<Po
       .putString(mode.storageKey(), json.toString())
       .apply()
 }
+
+private fun calendarSetupEvents(): List<PortalEvent> =
+    listOf(
+        PortalEvent("Calendar", "Add calendar feed", "Use calendar-feeds.local.json for Apple or Google"),
+        PortalEvent("Sync", "Tap Sync after install", "Rebuild the APK after editing the feed file"),
+    )
 
 private fun loadPortalMode(context: Context): PortalMode {
   val savedMode =
@@ -1045,28 +1434,31 @@ private fun JSONObject.toPortalEvent(): PortalEvent =
 
 private const val BACKEND_BASE_URL = "http://127.0.0.1:8787"
 
-private fun refreshHomeCalendar(onSuccess: (List<PortalEvent>) -> Unit, onFailure: () -> Unit) {
-  if (HOME_CALENDAR_FEED_URL.isBlank()) {
+private fun refreshHomeCalendar(context: Context, onSuccess: (List<PortalEvent>) -> Unit, onFailure: () -> Unit) {
+  val feeds = loadCalendarFeeds(context)
+  if (feeds.isEmpty()) {
     onFailure()
     return
   }
 
   Thread {
         runCatching {
-              val feedUrl = HOME_CALENDAR_FEED_URL.replace("webcal://", "https://")
-              val connection = (URL(feedUrl).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 4000
-                readTimeout = 6000
+              feeds.flatMap { feed ->
+                val feedUrl = feed.url.replace("webcal://", "https://")
+                val connection = (URL(feedUrl).openConnection() as HttpURLConnection).apply {
+                  requestMethod = "GET"
+                  connectTimeout = 4000
+                  readTimeout = 6000
+                }
+                val responseCode = connection.responseCode
+                if (responseCode !in 200..299) error("${feed.label} calendar failed with HTTP $responseCode")
+                val ics = connection.inputStream.bufferedReader().use { it.readText() }
+                parseIcsEvents(ics, feed.label)
               }
-              val responseCode = connection.responseCode
-              if (responseCode !in 200..299) error("Calendar feed failed with HTTP $responseCode")
-              val ics = connection.inputStream.bufferedReader().use { it.readText() }
-              parseIcsEvents(ics)
             }
             .onSuccess { events ->
               if (events.isNotEmpty()) {
-                onSuccess(events)
+                onSuccess(events.take(8))
               } else {
                 onFailure()
               }
@@ -1076,7 +1468,22 @@ private fun refreshHomeCalendar(onSuccess: (List<PortalEvent>) -> Unit, onFailur
       .start()
 }
 
-private fun parseIcsEvents(ics: String): List<PortalEvent> {
+private fun loadCalendarFeeds(context: Context): List<CalendarFeed> =
+    runCatching {
+          val json = context.assets.open(CALENDAR_FEEDS_ASSET).bufferedReader().use { it.readText() }
+          val feeds = JSONObject(json).optJSONArray("feeds") ?: JSONArray()
+          List(feeds.length()) { index ->
+                val feed = feeds.getJSONObject(index)
+                CalendarFeed(
+                    label = feed.optString("label", "Calendar"),
+                    url = feed.optString("url"),
+                )
+              }
+              .filter { it.url.isNotBlank() && !it.url.startsWith("YOUR_") && !it.url.contains("example.com") }
+        }
+        .getOrDefault(emptyList())
+
+private fun parseIcsEvents(ics: String, sourceLabel: String): List<PortalEvent> {
   val zone = ZoneId.systemDefault()
   val now = ZonedDateTime.now(zone)
   val until = now.plusDays(14)
@@ -1102,7 +1509,7 @@ private fun parseIcsEvents(ics: String): List<PortalEvent> {
               PortalEvent(
                   time = formatEventTime(eventStart, now),
                   title = unescapeIcsText(summary).ifBlank { "Calendar event" },
-                  detail = unescapeIcsText(location).ifBlank { "Apple Calendar" },
+                  detail = unescapeIcsText(location).ifBlank { sourceLabel },
               )
         }
         inEvent = false
@@ -1113,7 +1520,7 @@ private fun parseIcsEvents(ics: String): List<PortalEvent> {
     }
   }
 
-  return parsedEvents.sortedBy { it.first }.take(6).map { it.second }
+  return parsedEvents.sortedBy { it.first }.take(8).map { it.second }
 }
 
 private fun unfoldIcsLines(ics: String): List<String> {

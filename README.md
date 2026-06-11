@@ -8,9 +8,9 @@ Portal hardware is discontinued, but the device is still a capable Android touch
 
 These screenshots use sanitized sample data and match the 800 x 1280 Portal display shape.
 
-| Home dashboard | Office dashboard | Note editor |
+| Home calendar | Home lists | Note editor |
 | --- | --- | --- |
-| ![Home dashboard](docs/screenshots/portal-hub-home.png) | ![Office dashboard](docs/screenshots/portal-hub-office.png) | ![Note editor](docs/screenshots/portal-hub-note-editor.png) |
+| ![Home calendar](docs/screenshots/portal-hub-home.png) | ![Home lists](docs/screenshots/portal-hub-lists.png) | ![Note editor](docs/screenshots/portal-hub-note-editor.png) |
 
 ## What It Does
 
@@ -49,13 +49,15 @@ app/build/outputs/apk/debug/app-debug.apk
 
 ## Calendar Feeds
 
-The app supports read-only `.ics` / `webcal://` calendar feeds. The public repo ships with calendar sync disabled:
+The app supports read-only `.ics` / `webcal://` calendar feeds. The public repo ships without private calendar URLs.
 
-```kotlin
-private const val HOME_CALENDAR_FEED_URL = ""
+Copy the example asset to a local-only file:
+
+```bash
+cp app/src/main/assets/calendar-feeds.example.json app/src/main/assets/calendar-feeds.local.json
 ```
 
-For a private build, paste your own read-only feed URL into that constant, or extend the app with a settings screen. `webcal://` links are converted to `https://` before fetch.
+Then edit `calendar-feeds.local.json` with your private Apple and/or Google read-only calendar feed URLs. This file is ignored by Git. `webcal://` links are converted to `https://` before fetch.
 
 Recommended setup:
 
@@ -143,11 +145,7 @@ After selection, relaunching the app keeps that device in its chosen mode.
 
 ## Roadmap
 
-- Settings screen for calendar feed/backend URL
-- Wi-Fi backend URL instead of USB-only `adb reverse`
-- Real music provider/app launch
-- Better recurring event handling for `.ics`
-- Optional sync between multiple Portals
+See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Regenerate Screenshots
 

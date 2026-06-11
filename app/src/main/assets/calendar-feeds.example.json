@@ -1,0 +1,12 @@
+{
+  "feeds": [
+    {
+      "label": "Apple Calendar",
+      "url": "webcal://example.com/path/to/apple-calendar.ics"
+    },
+    {
+      "label": "Google Calendar",
+      "url": "https://calendar.google.com/calendar/ical/example/basic.ics"
+    }
+  ]
+}

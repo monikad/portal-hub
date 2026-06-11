@@ -16,6 +16,8 @@ local.properties
 
 # Local runtime state and generated QA artifacts. Keep these out of public repos.
 /data/*.json
+/data/*.md
+/app/src/main/assets/calendar-feeds.local.json
 /personal-os-portal*.png
 /window*.xml
 tools/*.class
